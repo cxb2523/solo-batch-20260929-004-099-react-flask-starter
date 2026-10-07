@@ -28,6 +28,7 @@ services:
       DEV: ${DEV}
       FLASK_DEBUG: '1'
       LOCALSTACK_HOST: 'localstack'
+      UPLOAD_MODE: ${UPLOAD_MODE:-celery}
     volumes:
       - './backend/filesystem/entrypoints:/entrypoints:ro'
       - './backend/migrations:/srv/migrations'
@@ -35,9 +36,20 @@ services:
     ports:
       - '8080:8080'
     depends_on:
-      - postgres
-      - redis
-      - localstack
+      postgres:
+        condition: 'service_healthy'
+      redis:
+        condition: 'service_healthy'
+      localstack:
+        condition: 'service_healthy'
+      migrate:
+        condition: 'service_completed_successfully'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
+      interval: '10s'
+      timeout: '5s'
+      retries: 12
+      start_period: '20s'
 
   worker:
     labels:
@@ -48,15 +60,43 @@ services:
       DEV: ${DEV}
       FLASK_DEBUG: '1'
       LOCALSTACK_HOST: 'localstack'
+      UPLOAD_MODE: ${UPLOAD_MODE:-celery}
     command: '/entrypoints/worker.sh'
     volumes:
       - './backend/filesystem/entrypoints:/entrypoints:ro'
       - './backend/migrations:/srv/migrations'
       - './backend/src:/srv/src:ro'
+      - './backend/tests:/srv/tests:ro'
+      - './backend/conftest.py:/srv/conftest.py:ro'
     depends_on:
-      - postgres
-      - redis
-      - localstack
+      postgres:
+        condition: 'service_healthy'
+      redis:
+        condition: 'service_healthy'
+      localstack:
+        condition: 'service_healthy'
+      migrate:
+        condition: 'service_completed_successfully'
+    healthcheck:
+      test: ['CMD-SHELL', 'pgrep -f celery > /dev/null || exit 1']
+      interval: '15s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+
+  migrate:
+    build: 'backend'
+    environment:
+      DATABASE_URL: 'postgres://obscure-user:obscure-password@postgres/app'
+      LOCALSTACK_HOST: 'localstack'
+    command: 'poetry run flask db upgrade'
+    volumes:
+      - './backend/filesystem/entrypoints:/entrypoints:ro'
+      - './backend/migrations:/srv/migrations'
+      - './backend/src:/srv/src:ro'
+    depends_on:
+      postgres:
+        condition: 'service_healthy'
 
   postgres:
     image: 'postgres:9.6-alpine'
@@ -69,11 +109,21 @@ services:
       - 'postgres:/var/lib/postgresql/data'
     ports:
       - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U obscure-user -d app']
+      interval: '5s'
+      timeout: '3s'
+      retries: 20
 
   redis:
     image: 'redis:5.0-alpine'
     ports:
       - '6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: '5s'
+      timeout: '3s'
+      retries: 20
 
   localstack:
     image: 'localstack/localstack:2.3.0'
@@ -85,6 +135,12 @@ services:
     ports:
       - "127.0.0.1:4566:4566"            # LocalStack Gateway
       - "127.0.0.1:4510-4559:4510-4559"  # external services port range
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: '5s'
+      timeout: '5s'
+      retries: 24
+      start_period: '15s'
 
 volumes:
   postgres:

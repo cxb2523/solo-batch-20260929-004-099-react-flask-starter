@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_migrate import Migrate
 
 from src import routes, utils as u
@@ -45,3 +45,7 @@ class Application:
         @self.flask_app.route('/')
         def home(key):
             return 'home'
+
+        @self.flask_app.route('/healthz')
+        def healthz():
+            return jsonify(status='ok')

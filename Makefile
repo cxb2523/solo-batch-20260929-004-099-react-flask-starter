@@ -2,6 +2,17 @@ VOLUME=$(shell basename $(PWD))
 
 develop: clean build migrations.upgrade run
 
+up:
+	docker compose up -d --build backend worker
+
+migrate:
+	docker compose run --rm migrate
+
+health:
+	@docker compose ps
+	@curl -fsS http://localhost:8080/healthz && echo " backend ok"
+	@curl -fsS http://localhost:4566/_localstack/health > /dev/null && echo " localstack ok"
+
 clean:
 	docker compose rm -vf
 
